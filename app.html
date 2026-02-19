@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DualOdds App — Live Arbitrage Feed</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0a0a0a; --white: #f5f5f0; --neon: #d4ff00;
+    --neon-glow: 0 0 40px rgba(212,255,0,0.4);
+    --gray: #1c1c1c; --gray-mid: #2e2e2e; --gray-text: #888;
+    --green: #00cc66; --orange: #ff9500; --red: #ff4444;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--black); color: var(--white); font-family: 'Syne', sans-serif; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 3px; } ::-webkit-scrollbar-thumb { background: var(--neon); }
+
+  /* ── AUTH GATE ── */
+  #authGate {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: var(--black); align-items: center; justify-content: center; flex-direction: column; gap: 2rem;
+  }
+  #authGate.show { display: flex; }
+  .gate-logo { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; letter-spacing: 0.1em; }
+  .gate-logo span { color: var(--neon); }
+  .gate-card { background: var(--gray); border: 1px solid var(--gray-mid); padding: 3rem; width: 100%; max-width: 420px; }
+  .gate-title { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; margin-bottom: 0.5rem; }
+  .gate-sub { font-family: 'Instrument Serif', serif; font-style: italic; color: var(--gray-text); font-size: 0.9rem; margin-bottom: 2rem; }
+  .gate-tabs { display: flex; margin-bottom: 2rem; border-bottom: 1px solid var(--gray-mid); }
+  .gate-tab { font-family: 'DM Mono', monospace; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 0.75rem 1.5rem; cursor: pointer; color: var(--gray-text); border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none; transition: color 0.2s, border-color 0.2s; }
+  .gate-tab.active { color: var(--neon); border-bottom-color: var(--neon); }
+  .form-group { margin-bottom: 1.25rem; }
+  .form-label { display: block; font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gray-text); margin-bottom: 0.5rem; }
+  .form-input { width: 100%; background: var(--black); border: 1px solid var(--gray-mid); color: var(--white); padding: 0.85rem 1rem; font-family: 'Syne', sans-serif; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
+  .form-input:focus { border-color: var(--neon); }
+  .form-input::placeholder { color: var(--gray-text); }
+  .btn-auth { width: 100%; background: var(--neon); color: var(--black); border: none; padding: 1rem; font-family: 'DM Mono', monospace; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: box-shadow 0.2s; margin-top: 0.5rem; }
+  .btn-auth:hover { box-shadow: var(--neon-glow); }
+  .btn-auth:disabled { opacity: 0.5; cursor: not-allowed; }
+  .auth-msg { font-family: 'DM Mono', monospace; font-size: 0.72rem; text-align: center; margin-top: 1rem; padding: 0.75rem; display: none; }
+  .auth-msg.error { background: rgba(255,60,60,0.1); color: #ff6b6b; border: 1px solid rgba(255,60,60,0.2); }
+  .auth-msg.success { background: rgba(212,255,0,0.08); color: var(--neon); border: 1px solid rgba(212,255,0,0.2); }
+  .back-link { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: var(--gray-text); text-decoration: none; letter-spacing: 0.1em; transition: color 0.2s; }
+  .back-link:hover { color: var(--neon); }
+
+  /* ── APP LAYOUT ── */
+  #appShell { display: none; }
+  #appShell.show { display: block; }
+
+  /* ── TOP BAR ── */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(10,10,10,0.95); backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(212,255,0,0.1);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 2rem;
+  }
+  .topbar-logo { font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; letter-spacing: 0.1em; }
+  .topbar-logo span { color: var(--neon); }
+  .topbar-right { display: flex; align-items: center; gap: 1.5rem; }
+  .topbar-plan { font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; padding: 0.3rem 0.75rem; border: 1px solid var(--neon); color: var(--neon); }
+  .topbar-email { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: var(--gray-text); }
+  .topbar-signout { background: none; border: 1px solid var(--gray-mid); color: var(--gray-text); font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 0.4rem 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .topbar-signout:hover { border-color: var(--neon); color: var(--neon); }
+
+  /* ── MAIN CONTENT ── */
+  .app-content { padding: 6rem 2rem 2rem; max-width: 1400px; margin: 0 auto; }
+
+  /* ── STATS ROW ── */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .stat-card { background: var(--gray); border: 1px solid var(--gray-mid); padding: 1.5rem; position: relative; overflow: hidden; }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: var(--neon); }
+  .stat-card-label { font-family: 'DM Mono', monospace; font-size: 0.62rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gray-text); margin-bottom: 0.5rem; }
+  .stat-card-value { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; color: var(--neon); letter-spacing: 0.05em; line-height: 1; }
+  .stat-card-sub { font-family: 'DM Mono', monospace; font-size: 0.62rem; color: var(--gray-text); margin-top: 0.3rem; }
+
+  /* ── FILTERS ── */
+  .filters { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center; }
+  .filter-label { font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); }
+  .filter-btn { background: var(--gray); border: 1px solid var(--gray-mid); color: var(--gray-text); font-family: 'DM Mono', monospace; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.4rem 1rem; cursor: pointer; transition: all 0.2s; }
+  .filter-btn.active, .filter-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(212,255,0,0.05); }
+
+  /* ── ARB FEED ── */
+  .feed-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .feed-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; letter-spacing: 0.05em; }
+  .feed-live { font-family: 'DM Mono', monospace; font-size: 0.65rem; color: var(--neon); display: flex; align-items: center; gap: 0.4rem; }
+  .feed-live::before { content: '●'; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .feed-updated { font-family: 'DM Mono', monospace; font-size: 0.62rem; color: var(--gray-text); }
+
+  .arb-grid { display: flex; flex-direction: column; gap: 2px; }
+
+  /* ── ARB CARD ── */
+  .arb-card {
+    background: var(--gray); border: 1px solid var(--gray-mid);
+    padding: 1.5rem 2rem; display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr;
+    gap: 1rem; align-items: center;
+    transition: border-color 0.2s, transform 0.15s;
+    position: relative; overflow: hidden;
+  }
+  .arb-card:hover { border-color: var(--neon); transform: translateX(-3px); }
+  .arb-card::before { content: ''; position: absolute; left: 0; top: 0; width: 3px; height: 100%; background: var(--neon); opacity: 0; transition: opacity 0.2s; }
+  .arb-card:hover::before { opacity: 1; }
+  .arb-match-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.3rem; }
+  .arb-meta { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .arb-sport-tag { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; background: var(--gray-mid); padding: 0.2rem 0.5rem; color: var(--gray-text); }
+  .arb-time { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--gray-text); }
+  .arb-col-label { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); margin-bottom: 0.3rem; }
+  .arb-col-value { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1; }
+  .arb-col-value.profit { color: var(--neon); }
+  .arb-col-value.high { color: var(--neon); }
+  .arb-col-value.med { color: #88cc00; }
+  .arb-col-sub { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--gray-text); margin-top: 0.2rem; }
+  .arb-books { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .arb-book { background: var(--gray-mid); font-family: 'DM Mono', monospace; font-size: 0.62rem; padding: 0.25rem 0.5rem; color: var(--white); }
+  .btn-calc { background: transparent; border: 1px solid var(--neon); color: var(--neon); font-family: 'DM Mono', monospace; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.5rem 1rem; cursor: pointer; transition: all 0.2s; width: 100%; }
+  .btn-calc:hover { background: var(--neon); color: var(--black); }
+
+  /* ── LOCKED OVERLAY ── */
+  .locked-overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(10,10,10,0.92);
+    backdrop-filter: blur(12px);
+    display: none; align-items: center; justify-content: center;
+  }
+  .locked-overlay.show { display: flex; }
+  .locked-card { background: var(--gray); border: 1px solid var(--neon); padding: 4rem 3rem; text-align: center; max-width: 520px; width: 90%; box-shadow: 0 0 80px rgba(212,255,0,0.1); }
+  .locked-icon { font-size: 3rem; margin-bottom: 1.5rem; }
+  .locked-title { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; letter-spacing: 0.05em; margin-bottom: 0.75rem; line-height: 1; }
+  .locked-title span { color: var(--neon); }
+  .locked-sub { font-family: 'Instrument Serif', serif; font-style: italic; color: var(--gray-text); font-size: 1rem; line-height: 1.7; margin-bottom: 2.5rem; }
+  .locked-plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
+  .locked-plan { background: var(--black); border: 1px solid var(--gray-mid); padding: 1.25rem 1rem; text-align: center; transition: border-color 0.2s; }
+  .locked-plan:hover { border-color: var(--neon); }
+  .locked-plan.featured { border-color: var(--neon); background: rgba(212,255,0,0.03); }
+  .locked-plan-name { font-family: 'DM Mono', monospace; font-size: 0.62rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gray-text); margin-bottom: 0.5rem; }
+  .locked-plan-price { font-family: 'Bebas Neue', sans-serif; font-size: 1.8rem; color: var(--white); line-height: 1; }
+  .locked-plan.featured .locked-plan-price { color: var(--neon); }
+  .locked-plan-period { font-family: 'DM Mono', monospace; font-size: 0.58rem; color: var(--gray-text); }
+  .btn-subscribe { display: block; background: var(--neon); color: var(--black); font-family: 'DM Mono', monospace; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 1rem 2.5rem; text-decoration: none; margin: 0 auto 1rem; border: none; cursor: pointer; transition: box-shadow 0.2s; }
+  .btn-subscribe:hover { box-shadow: var(--neon-glow); }
+  .locked-note { font-family: 'DM Mono', monospace; font-size: 0.65rem; color: var(--gray-text); }
+
+  /* ── CALCULATOR MODAL ── */
+  .calc-overlay { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); align-items: center; justify-content: center; }
+  .calc-overlay.open { display: flex; }
+  .calc-modal { background: var(--gray); border: 1px solid var(--neon); padding: 2.5rem; width: 100%; max-width: 480px; position: relative; }
+  .calc-close { position: absolute; top: 1rem; right: 1rem; background: none; border: none; color: var(--gray-text); font-size: 1.2rem; cursor: pointer; }
+  .calc-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.8rem; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+  .calc-match { font-family: 'DM Mono', monospace; font-size: 0.7rem; color: var(--neon); letter-spacing: 0.1em; margin-bottom: 2rem; }
+  .calc-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; align-items: center; }
+  .calc-row-header { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); }
+  .calc-outcome { font-size: 0.85rem; font-weight: 600; }
+  .calc-odds { font-family: 'DM Mono', monospace; font-size: 0.85rem; color: var(--neon); }
+  .calc-stake { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; color: var(--white); }
+  .calc-divider { height: 1px; background: var(--gray-mid); margin: 1.5rem 0; }
+  .calc-result { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+  .calc-result-label { font-family: 'DM Mono', monospace; font-size: 0.7rem; color: var(--gray-text); letter-spacing: 0.1em; text-transform: uppercase; }
+  .calc-result-value { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; color: var(--neon); }
+  .calc-bankroll-wrap { margin-bottom: 1.5rem; }
+  .calc-bankroll-input { width: 100%; background: var(--black); border: 1px solid var(--gray-mid); color: var(--white); padding: 0.75rem 1rem; font-family: 'DM Mono', monospace; font-size: 1rem; outline: none; transition: border-color 0.2s; }
+  .calc-bankroll-input:focus { border-color: var(--neon); }
+
+  /* ── TOAST ── */
+  .toast { position: fixed; bottom: 2rem; right: 2rem; z-index: 300; background: var(--gray); border: 1px solid var(--neon); padding: 1rem 1.5rem; font-family: 'DM Mono', monospace; font-size: 0.78rem; color: var(--white); transform: translateY(100px); opacity: 0; transition: transform 0.3s, opacity 0.3s; display: flex; align-items: center; gap: 0.75rem; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast-icon { color: var(--neon); }
+
+  /* ── LOADING ── */
+  #loadingScreen { position: fixed; inset: 0; background: var(--black); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 1.5rem; z-index: 300; }
+  .loading-logo { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; letter-spacing: 0.1em; animation: flicker 1.5s infinite; }
+  .loading-logo span { color: var(--neon); }
+  @keyframes flicker { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  .loading-bar { width: 200px; height: 2px; background: var(--gray-mid); overflow: hidden; }
+  .loading-bar-fill { height: 100%; background: var(--neon); animation: loadBar 1.5s ease infinite; }
+  @keyframes loadBar { 0%{width:0;margin-left:0} 50%{width:100%;margin-left:0} 100%{width:0;margin-left:100%} }
+
+  /* ── MOBILE ── */
+  @media (max-width: 768px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .arb-card { grid-template-columns: 1fr 1fr; }
+    .arb-card > :nth-child(5) { grid-column: 1/-1; }
+    .topbar-email { display: none; }
+    .locked-plans { grid-template-columns: 1fr; }
+    .app-content { padding: 5rem 1rem 1rem; }
+    .calc-row { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loadingScreen">
+  <div class="loading-logo">DUAL<span>ODDS</span></div>
+  <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+</div>
+
+<!-- AUTH GATE -->
+<div id="authGate">
+  <div class="loading-logo gate-logo">DUAL<span>ODDS</span></div>
+  <div class="gate-card">
+    <div class="gate-title">Welcome Back</div>
+    <div class="gate-sub">Sign in to access your arbitrage feed</div>
+    <div class="gate-tabs">
+      <button class="gate-tab active" onclick="switchGateTab('login')">Sign In</button>
+      <button class="gate-tab" onclick="switchGateTab('signup')">Create Account</button>
+    </div>
+    <div id="gateLoginForm">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="gateEmail" placeholder="you@example.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="gatePassword" placeholder="••••••••" />
+      </div>
+      <button class="btn-auth" id="gateLoginBtn" onclick="handleGateLogin()">Sign In →</button>
+      <div id="gateLoginMsg" class="auth-msg"></div>
+    </div>
+    <div id="gateSignupForm" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input class="form-input" type="text" id="gateSignupName" placeholder="John Smith" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="gateSignupEmail" placeholder="you@example.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password (min. 8 characters)</label>
+        <input class="form-input" type="password" id="gateSignupPassword" placeholder="••••••••" />
+      </div>
+      <button class="btn-auth" id="gateSignupBtn" onclick="handleGateSignup()">Create Account →</button>
+      <div id="gateSignupMsg" class="auth-msg"></div>
+    </div>
+  </div>
+  <a href="https://dualodds.io" class="back-link">← Back to dualodds.io</a>
+</div>
+
+<!-- LOCKED OVERLAY (no subscription) -->
+<div class="locked-overlay" id="lockedOverlay">
+  <div class="locked-card">
+    <div class="locked-icon">🔒</div>
+    <div class="locked-title">UNLOCK YOUR<br><span>EDGE</span></div>
+    <div class="locked-sub">You're logged in but don't have an active subscription. Choose a plan to access live arbitrage opportunities.</div>
+    <div class="locked-plans">
+      <div class="locked-plan">
+        <div class="locked-plan-name">Basic</div>
+        <div class="locked-plan-price">$29.99</div>
+        <div class="locked-plan-period">/month</div>
+      </div>
+      <div class="locked-plan featured">
+        <div class="locked-plan-name">Pro ★</div>
+        <div class="locked-plan-price">$49.99</div>
+        <div class="locked-plan-period">/month</div>
+      </div>
+      <div class="locked-plan">
+        <div class="locked-plan-name">Elite</div>
+        <div class="locked-plan-price">$79.99</div>
+        <div class="locked-plan-period">/month</div>
+      </div>
+    </div>
+    <button class="btn-subscribe" onclick="window.open('https://dualodds.io/#pricing','_blank')">View Plans & Subscribe →</button>
+    <div class="locked-note">Already subscribed? <span style="color:var(--neon);cursor:pointer" onclick="checkManualPlan()">Click here to refresh</span></div>
+  </div>
+</div>
+
+<!-- CALCULATOR MODAL -->
+<div class="calc-overlay" id="calcModal">
+  <div class="calc-modal">
+    <button class="calc-close" onclick="closeCalc()">✕</button>
+    <div class="calc-title">STAKE CALCULATOR</div>
+    <div class="calc-match" id="calcMatchName">—</div>
+    <div class="form-group calc-bankroll-wrap">
+      <label class="form-label">Your Bankroll ($)</label>
+      <input class="calc-bankroll-input" type="number" id="calcBankroll" value="1000" min="1" oninput="recalculate()" />
+    </div>
+    <div class="calc-row">
+      <div class="calc-row-header">Outcome</div>
+      <div class="calc-row-header">Odds</div>
+      <div class="calc-row-header">Stake</div>
+    </div>
+    <div id="calcRows"></div>
+    <div class="calc-divider"></div>
+    <div class="calc-result">
+      <div class="calc-result-label">Guaranteed Profit</div>
+      <div class="calc-result-value" id="calcProfit">—</div>
+    </div>
+    <div class="calc-result">
+      <div class="calc-result-label">Profit %</div>
+      <div class="calc-result-value" id="calcPct" style="font-size:1.1rem">—</div>
+    </div>
+    <div class="calc-result">
+      <div class="calc-result-label">Guaranteed Return</div>
+      <div class="calc-result-value" id="calcReturn" style="font-size:1.1rem;color:var(--white)">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"><span class="toast-icon">✓</span><span id="toastMsg"></span></div>
+
+<!-- APP SHELL -->
+<div id="appShell">
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="topbar-logo">DUAL<span>ODDS</span></div>
+    <div class="topbar-right">
+      <div class="topbar-plan" id="topbarPlan">FREE</div>
+      <div class="topbar-email" id="topbarEmail">—</div>
+      <button class="topbar-signout" onclick="handleSignOut()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="app-content">
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-card-label">Live Opportunities</div>
+        <div class="stat-card-value" id="statLive">24</div>
+        <div class="stat-card-sub">Right now</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Avg Profit</div>
+        <div class="stat-card-value" id="statAvg">3.8%</div>
+        <div class="stat-card-sub">Per opportunity</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Bookmakers</div>
+        <div class="stat-card-value">58</div>
+        <div class="stat-card-sub">Monitored 24/7</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Last Updated</div>
+        <div class="stat-card-value" id="statUpdated" style="font-size:1.2rem">—</div>
+        <div class="stat-card-sub">Auto-refreshes every 5 min</div>
+      </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div class="filters">
+      <span class="filter-label">Sport:</span>
+      <button class="filter-btn active" onclick="filterSport('all', this)">All</button>
+      <button class="filter-btn" onclick="filterSport('soccer', this)">⚽ Football</button>
+      <button class="filter-btn" onclick="filterSport('basketball', this)">🏀 Basketball</button>
+      <button class="filter-btn" onclick="filterSport('tennis', this)">🎾 Tennis</button>
+      <button class="filter-btn" onclick="filterSport('nfl', this)">🏈 NFL</button>
+      <button class="filter-btn" onclick="filterSport('hockey', this)">🏒 Hockey</button>
+    </div>
+
+    <!-- FEED -->
+    <div class="feed-header">
+      <div class="feed-title">LIVE ARB FEED</div>
+      <div style="display:flex;gap:1.5rem;align-items:center">
+        <div class="feed-live">Scanning</div>
+        <div class="feed-updated" id="feedUpdated">Updated just now</div>
+      </div>
+    </div>
+    <div class="arb-grid" id="arbFeed"></div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// SUPABASE
+// ─────────────────────────────────────────────
+const { createClient } = supabase;
+const sb = createClient(
+  'https://tcsqwsunhddbmglqmmgq.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc3F3c3VuaGRkYm1nbHFtbWdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0NjA1NTQsImV4cCI6MjA4NzAzNjU1NH0.sNckIQ3yOrDhvCV0bzegIWwc3go96ZZcY9JPjWaIn_o'
+);
+
+// ─────────────────────────────────────────────
+// DEMO ARB DATA
+// ─────────────────────────────────────────────
+const ARB_DATA = [
+  { id:1, sport:'soccer', sportLabel:'⚽ Premier League', match:'Arsenal vs Chelsea', time:'Today 20:45', profitPct:4.2, profitAmt:42, bookmakers:['Bet365','Pinnacle'], outcomes:[{name:'Arsenal Win',odds:2.85,book:'Bet365'},{name:'Draw',odds:4.10,book:'Pinnacle'},{name:'Chelsea Win',odds:3.20,book:'1xBet'}] },
+  { id:2, sport:'tennis', sportLabel:'🎾 ATP Masters', match:'Djokovic vs Alcaraz', time:'Today 15:00', profitPct:6.1, profitAmt:61, bookmakers:['Betway','Unibet'], outcomes:[{name:'Djokovic',odds:1.95,book:'Betway'},{name:'Alcaraz',odds:2.40,book:'Unibet'}] },
+  { id:3, sport:'basketball', sportLabel:'🏀 NBA', match:'Lakers vs Celtics', time:'Today 01:30', profitPct:2.8, profitAmt:28, bookmakers:['DraftKings','FanDuel'], outcomes:[{name:'Lakers',odds:2.15,book:'DraftKings'},{name:'Celtics',odds:1.85,book:'FanDuel'}] },
+  { id:4, sport:'soccer', sportLabel:'⚽ La Liga', match:'Real Madrid vs Barcelona', time:'Tomorrow 21:00', profitPct:5.3, profitAmt:53, bookmakers:['1xBet','Bwin'], outcomes:[{name:'Real Madrid',odds:2.50,book:'1xBet'},{name:'Draw',odds:3.80,book:'Bwin'},{name:'Barcelona',odds:2.90,book:'Pinnacle'}] },
+  { id:5, sport:'nfl', sportLabel:'🏈 NFL', match:'Chiefs vs Ravens', time:'Sunday 18:30', profitPct:3.5, profitAmt:35, bookmakers:['BetMGM','DraftKings'], outcomes:[{name:'Chiefs',odds:1.90,book:'BetMGM'},{name:'Ravens',odds:2.20,book:'DraftKings'}] },
+  { id:6, sport:'hockey', sportLabel:'🏒 NHL', match:'Maple Leafs vs Bruins', time:'Today 23:00', profitPct:2.2, profitAmt:22, bookmakers:['Bet365','William Hill'], outcomes:[{name:'Maple Leafs',odds:2.30,book:'Bet365'},{name:'Bruins',odds:1.95,book:'William Hill'}] },
+  { id:7, sport:'soccer', sportLabel:'⚽ Bundesliga', match:'Bayern vs Dortmund', time:'Tomorrow 18:30', profitPct:4.8, profitAmt:48, bookmakers:['Pinnacle','Betfair'], outcomes:[{name:'Bayern',odds:1.75,book:'Pinnacle'},{name:'Draw',odds:4.50,book:'Betfair'},{name:'Dortmund',odds:5.20,book:'1xBet'}] },
+  { id:8, sport:'tennis', sportLabel:'🎾 WTA Tour', match:'Swiatek vs Sabalenka', time:'Today 13:00', profitPct:3.9, profitAmt:39, bookmakers:['Unibet','Betway'], outcomes:[{name:'Swiatek',odds:1.80,book:'Unibet'},{name:'Sabalenka',odds:2.50,book:'Betway'}] },
+  { id:9, sport:'basketball', sportLabel:'🏀 EuroLeague', match:'Real Madrid vs CSKA', time:'Tomorrow 19:00', profitPct:5.7, profitAmt:57, bookmakers:['Bwin','1xBet'], outcomes:[{name:'Real Madrid',odds:2.10,book:'Bwin'},{name:'CSKA Moscow',odds:2.05,book:'1xBet'}] },
+  { id:10, sport:'soccer', sportLabel:'⚽ Serie A', match:'Inter Milan vs Juventus', time:'Sunday 20:45', profitPct:3.1, profitAmt:31, bookmakers:['Bet365','Betfair'], outcomes:[{name:'Inter Milan',odds:2.40,book:'Bet365'},{name:'Draw',odds:3.60,book:'Betfair'},{name:'Juventus',odds:3.10,book:'Pinnacle'}] },
+];
+
+let currentFilter = 'all';
+let currentArb = null;
+let userPlan = 'none';
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  document.getElementById('loadingScreen').style.display = 'none';
+
+  if (!session) {
+    document.getElementById('authGate').classList.add('show');
+    return;
+  }
+  initApp(session.user);
+});
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    document.getElementById('authGate').classList.remove('show');
+    initApp(session.user);
+  }
+  if (event === 'SIGNED_OUT') {
+    document.getElementById('appShell').classList.remove('show');
+    document.getElementById('authGate').classList.add('show');
+  }
+});
+
+function initApp(user) {
+  document.getElementById('appShell').classList.add('show');
+  document.getElementById('topbarEmail').textContent = user.email;
+  document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
+  document.getElementById('feedUpdated').textContent = 'Updated just now';
+
+  // Check plan from user metadata
+  const plan = user.user_metadata?.plan || 'none';
+  userPlan = plan;
+  updatePlanUI(plan);
+
+  renderFeed(ARB_DATA);
+  animateStats();
+  setInterval(() => animateStats(), 5000);
+}
+
+function updatePlanUI(plan) {
+  const planEl = document.getElementById('topbarPlan');
+  if (plan === 'none' || !plan) {
+    planEl.textContent = 'NO PLAN';
+    planEl.style.borderColor = 'var(--gray-mid)';
+    planEl.style.color = 'var(--gray-text)';
+    document.getElementById('lockedOverlay').classList.add('show');
+  } else {
+    planEl.textContent = plan.toUpperCase();
+    planEl.style.borderColor = 'var(--neon)';
+    planEl.style.color = 'var(--neon)';
+    document.getElementById('lockedOverlay').classList.remove('show');
+  }
+}
+
+function checkManualPlan() {
+  // Refresh session to check if plan was updated
+  sb.auth.refreshSession().then(({ data }) => {
+    if (data?.session) {
+      const plan = data.session.user.user_metadata?.plan || 'none';
+      userPlan = plan;
+      updatePlanUI(plan);
+      if (plan !== 'none') showToast('Plan activated! Welcome to DualOdds ✓');
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+// FEED RENDERING
+// ─────────────────────────────────────────────
+function renderFeed(data) {
+  const feed = document.getElementById('arbFeed');
+  const filtered = currentFilter === 'all' ? data : data.filter(a => a.sport === currentFilter);
+  document.getElementById('statLive').textContent = filtered.length;
+
+  feed.innerHTML = filtered.map(arb => `
+    <div class="arb-card" data-id="${arb.id}">
+      <div>
+        <div class="arb-match-name">${arb.match}</div>
+        <div class="arb-meta">
+          <span class="arb-sport-tag">${arb.sportLabel}</span>
+          <span class="arb-time">🕐 ${arb.time}</span>
+        </div>
+      </div>
+      <div>
+        <div class="arb-col-label">Profit</div>
+        <div class="arb-col-value ${arb.profitPct >= 4 ? 'high' : 'med'}">+${arb.profitPct.toFixed(1)}%</div>
+        <div class="arb-col-sub">+$${arb.profitAmt}/£1000</div>
+      </div>
+      <div>
+        <div class="arb-col-label">Bookmakers</div>
+        <div class="arb-books">${arb.bookmakers.map(b => `<span class="arb-book">${b}</span>`).join('')}</div>
+      </div>
+      <div>
+        <div class="arb-col-label">Outcomes</div>
+        <div class="arb-col-value" style="font-size:1rem;color:var(--white)">${arb.outcomes.length}-way arb</div>
+        <div class="arb-col-sub">${arb.outcomes.map(o => o.odds).join(' / ')}</div>
+      </div>
+      <div>
+        <button class="btn-calc" onclick="openCalc(${arb.id})">Calculate Stakes →</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterSport(sport, btn) {
+  currentFilter = sport;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderFeed(ARB_DATA);
+}
+
+// ─────────────────────────────────────────────
+// CALCULATOR
+// ─────────────────────────────────────────────
+function openCalc(id) {
+  currentArb = ARB_DATA.find(a => a.id === id);
+  if (!currentArb) return;
+  document.getElementById('calcMatchName').textContent = currentArb.match;
+  document.getElementById('calcModal').classList.add('open');
+  recalculate();
+}
+function closeCalc() { document.getElementById('calcModal').classList.remove('open'); }
+
+function recalculate() {
+  if (!currentArb) return;
+  const bankroll = parseFloat(document.getElementById('calcBankroll').value) || 1000;
+  const odds = currentArb.outcomes.map(o => o.odds);
+  const impliedSum = odds.reduce((s, o) => s + (1/o), 0);
+  const profitPct = ((1/impliedSum) - 1) * 100;
+  const guaranteedReturn = bankroll / impliedSum;
+  const profit = guaranteedReturn - bankroll;
+
+  document.getElementById('calcProfit').textContent = `$${profit.toFixed(2)}`;
+  document.getElementById('calcPct').textContent = `+${profitPct.toFixed(2)}%`;
+  document.getElementById('calcReturn').textContent = `$${guaranteedReturn.toFixed(2)}`;
+
+  document.getElementById('calcRows').innerHTML = currentArb.outcomes.map(o => {
+    const stake = (bankroll / (o.odds * impliedSum)).toFixed(2);
+    return `
+      <div class="calc-row" style="margin-bottom:0.75rem;padding-bottom:0.75rem;border-bottom:1px solid var(--gray-mid)">
+        <div>
+          <div class="calc-outcome">${o.name}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:0.6rem;color:var(--gray-text)">${o.book}</div>
+        </div>
+        <div class="calc-odds">${o.odds}</div>
+        <div class="calc-stake">$${stake}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+// AUTH GATE
+// ─────────────────────────────────────────────
+function switchGateTab(tab) {
+  document.querySelectorAll('.gate-tab').forEach((t, i) => {
+    t.classList.toggle('active', (tab==='login'&&i===0)||(tab==='signup'&&i===1));
+  });
+  document.getElementById('gateLoginForm').style.display = tab==='login' ? 'block' : 'none';
+  document.getElementById('gateSignupForm').style.display = tab==='signup' ? 'block' : 'none';
+}
+
+async function handleGateLogin() {
+  const email = document.getElementById('gateEmail').value.trim();
+  const password = document.getElementById('gatePassword').value;
+  const btn = document.getElementById('gateLoginBtn');
+  const msg = document.getElementById('gateLoginMsg');
+  if (!email || !password) return showMsg(msg, 'Please fill in all fields.', 'error');
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  btn.disabled = false; btn.textContent = 'Sign In →';
+  if (error) showMsg(msg, error.message, 'error');
+}
+
+async function handleGateSignup() {
+  const name = document.getElementById('gateSignupName').value.trim();
+  const email = document.getElementById('gateSignupEmail').value.trim();
+  const password = document.getElementById('gateSignupPassword').value;
+  const btn = document.getElementById('gateSignupBtn');
+  const msg = document.getElementById('gateSignupMsg');
+  if (!name||!email||!password) return showMsg(msg,'Please fill in all fields.','error');
+  if (password.length < 8) return showMsg(msg,'Password must be at least 8 characters.','error');
+  btn.disabled = true; btn.textContent = 'Creating account...';
+  const { error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name } } });
+  btn.disabled = false; btn.textContent = 'Create Account →';
+  if (error) showMsg(msg, error.message, 'error');
+  else showMsg(msg, '✓ Check your email to verify your account!', 'success');
+}
+
+async function handleSignOut() {
+  await sb.auth.signOut();
+}
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function showMsg(el, text, type) {
+  el.style.display = 'block';
+  el.className = `auth-msg ${type}`;
+  el.textContent = text;
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+function animateStats() {
+  document.querySelectorAll('.arb-card').forEach(card => {
+    const profitEl = card.querySelector('.arb-col-value.high, .arb-col-value.med');
+    if (!profitEl) return;
+    const base = parseFloat(profitEl.textContent);
+    const newVal = Math.max(0.5, base + (Math.random()-0.5)*0.3).toFixed(1);
+    profitEl.textContent = `+${newVal}%`;
+  });
+}
+
+// Close calc on outside click
+document.getElementById('calcModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('calcModal')) closeCalc();
+});
+</script>
+</body>
+</html>
