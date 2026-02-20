@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -376,16 +375,17 @@ const sb = createClient(
 );
 
 // ─────────────────────────────────────────────
-// API-FOOTBALL CONFIG
+// ODDS API CONFIG
 // ─────────────────────────────────────────────
-const AF_KEY = '6cd500ba3a0985b20916c1b5a7f6ff41';
-const AF_HOST = 'v3.football.api-sports.io';
-
-const LEAGUE_LABELS = {
-  39: '⚽ Premier League', 140: '⚽ La Liga', 78: '⚽ Bundesliga',
-  135: '⚽ Serie A', 61: '⚽ Ligue 1', 2: '⚽ Champions League',
-  3: '⚽ Europa League', 848: '⚽ Conference League'
-};
+const ODDS_API_KEY = '89dd3e2bc659bc949bc2b710cc5fe6ba';
+const SPORTS = [
+  { key: 'soccer_epl', label: '⚽ Premier League', filter: 'soccer' },
+  { key: 'soccer_spain_la_liga', label: '⚽ La Liga', filter: 'soccer' },
+  { key: 'soccer_germany_bundesliga', label: '⚽ Bundesliga', filter: 'soccer' },
+  { key: 'basketball_nba', label: '🏀 NBA', filter: 'basketball' },
+  { key: 'americanfootball_nfl', label: '🏈 NFL', filter: 'nfl' },
+  { key: 'icehockey_nhl', label: '🏒 NHL', filter: 'hockey' },
+];
 
 let ARB_DATA = [];
 let currentFilter = 'all';
@@ -400,28 +400,24 @@ async function fetchArbitrageOpportunities() {
   const allArbs = [];
   let id = 1;
 
-  // Fetch odds for today and tomorrow
-  const dates = [getDateStr(0), getDateStr(1), getDateStr(2)];
-
-  for (const date of dates) {
+  for (const sport of SPORTS) {
     try {
       const res = await fetch(
-        `https://${AF_HOST}/odds?date=${date}&season=2024`,
-        { headers: { 'x-apisports-key': AF_KEY } }
+        `https://api.the-odds-api.com/v4/sports/${sport.key}/odds/?apiKey=${ODDS_API_KEY}&regions=uk,eu,us&markets=h2h&oddsFormat=decimal`
       );
       if (!res.ok) continue;
-      const data = await res.json();
-      const fixtures = data.response || [];
+      const events = await res.json();
 
-      for (const item of fixtures) {
-        const arb = findArbitrageAF(item, id);
+      for (const event of events) {
+        const arb = findArbitrage(event, sport, id);
         if (arb) { allArbs.push(arb); id++; }
       }
-    } catch(e) {
-      console.log(`Skip date ${date}:`, e.message);
+    } catch (e) {
+      console.log(`Skip ${sport.key}:`, e.message);
     }
   }
 
+  // Sort by profit % descending
   allArbs.sort((a, b) => b.profitPct - a.profitPct);
   ARB_DATA = allArbs;
 
@@ -433,7 +429,7 @@ async function fetchArbitrageOpportunities() {
   if (allArbs.length === 0) {
     document.getElementById('arbFeed').innerHTML = `
       <div style="text-align:center;padding:4rem;color:var(--gray-text);font-family:'DM Mono',monospace;font-size:0.8rem;">
-        No arbitrage opportunities found right now.<br>
+        No arbitrage opportunities found right now. Markets are efficient at this moment.<br>
         <span style="color:var(--neon)">Auto-refreshing every 5 minutes...</span>
       </div>`;
   } else {
@@ -441,55 +437,44 @@ async function fetchArbitrageOpportunities() {
   }
 }
 
-function getDateStr(daysAhead) {
-  const d = new Date();
-  d.setDate(d.getDate() + daysAhead);
-  return d.toISOString().split('T')[0];
-}
+function findArbitrage(event, sport, id) {
+  // For each outcome, find the best odds across all bookmakers
+  const outcomeNames = new Set();
+  event.bookmakers?.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
 
-function findArbitrageAF(item, id) {
-  const bookmakers = item.bookmakers || [];
-  if (bookmakers.length < 2) return null;
-
-  const fixture = item.fixture;
-  const league = item.league;
-
-  // Find best odds for each outcome across all bookmakers
   const bestOdds = {};
-  bookmakers.forEach(bm => {
-    const market = bm.bets?.find(b => b.name === 'Match Winner' || b.id === 1);
-    if (!market) return;
-    market.values?.forEach(v => {
-      const odds = parseFloat(v.odd);
-      if (!bestOdds[v.value] || odds > bestOdds[v.value].odds) {
-        bestOdds[v.value] = { odds, book: bm.name };
+  outcomeNames.forEach(name => {
+    let best = { odds: 0, book: '' };
+    event.bookmakers?.forEach(bm => {
+      const outcome = bm.markets?.[0]?.outcomes?.find(o => o.name === name);
+      if (outcome && outcome.price > best.odds) {
+        best = { odds: outcome.price, book: bm.title };
       }
     });
+    if (best.odds > 0) bestOdds[name] = best;
   });
 
   const outcomes = Object.entries(bestOdds).map(([name, {odds, book}]) => ({ name, odds, book }));
   if (outcomes.length < 2) return null;
 
   const impliedSum = outcomes.reduce((s, o) => s + (1 / o.odds), 0);
-  if (impliedSum >= 1) return null;
+  if (impliedSum >= 1) return null; // Not an arbitrage
 
   const profitPct = ((1 / impliedSum) - 1) * 100;
-  if (profitPct < 0.3) return null;
+  if (profitPct < 0.5) return null; // Too small
 
-  const kickoff = new Date(fixture.date);
-  const isToday = kickoff.toDateString() === new Date().toDateString();
-  const timeStr = isToday
-    ? `Today ${kickoff.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
-    : `${kickoff.toLocaleDateString([], {month:'short', day:'numeric'})} ${kickoff.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+  const commence = new Date(event.commence_time);
+  const timeStr = commence.toLocaleDateString() === new Date().toLocaleDateString()
+    ? `Today ${commence.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
+    : commence.toLocaleDateString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
 
-  const leagueLabel = LEAGUE_LABELS[league?.id] || `⚽ ${league?.name || 'Football'}`;
   const books = [...new Set(outcomes.map(o => o.book))];
 
   return {
     id,
-    sport: 'soccer',
-    sportLabel: leagueLabel,
-    match: `${fixture.teams?.home?.name || 'Home'} vs ${fixture.teams?.away?.name || 'Away'}`,
+    sport: sport.filter,
+    sportLabel: sport.label,
+    match: `${event.home_team} vs ${event.away_team}`,
     time: timeStr,
     profitPct: parseFloat(profitPct.toFixed(2)),
     profitAmt: parseFloat((profitPct * 10).toFixed(2)),
