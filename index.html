@@ -95,28 +95,35 @@
   /* ── ARB CARD ── */
   .arb-card {
     background: var(--gray); border: 1px solid var(--gray-mid);
-    padding: 1.5rem 2rem; display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr;
-    gap: 1rem; align-items: center;
+    padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 1rem;
     transition: border-color 0.2s, transform 0.15s;
     position: relative; overflow: hidden;
   }
   .arb-card:hover { border-color: var(--neon); transform: translateX(-3px); }
   .arb-card::before { content: ''; position: absolute; left: 0; top: 0; width: 3px; height: 100%; background: var(--neon); opacity: 0; transition: opacity 0.2s; }
   .arb-card:hover::before { opacity: 1; }
+  .arb-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .arb-profit-col { text-align: right; flex-shrink: 0; }
   .arb-match-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.3rem; }
   .arb-meta { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
   .arb-sport-tag { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; background: var(--gray-mid); padding: 0.2rem 0.5rem; color: var(--gray-text); }
   .arb-time { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--gray-text); }
+  .arb-score { font-family: 'DM Mono', monospace; font-size: 0.7rem; margin-top: 0.4rem; color: var(--gray-text); }
+  .arb-score.live { color: var(--neon); }
+  .score-live-dot { animation: blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .arb-col-label { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); margin-bottom: 0.3rem; }
   .arb-col-value { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1; }
   .arb-col-value.profit { color: var(--neon); }
   .arb-col-value.high { color: var(--neon); }
   .arb-col-value.med { color: #88cc00; }
   .arb-col-sub { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--gray-text); margin-top: 0.2rem; }
-  .arb-books { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-  .arb-book { background: var(--gray-mid); font-family: 'DM Mono', monospace; font-size: 0.62rem; padding: 0.25rem 0.5rem; color: var(--white); }
-  .btn-calc { background: transparent; border: 1px solid var(--neon); color: var(--neon); font-family: 'DM Mono', monospace; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.5rem 1rem; cursor: pointer; transition: all 0.2s; width: 100%; }
+  .arb-book-links { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .arb-book-link { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--gray-mid); border: 1px solid transparent; font-family: 'DM Mono', monospace; font-size: 0.65rem; padding: 0.4rem 0.8rem; color: var(--white); text-decoration: none; transition: all 0.2s; }
+  .arb-book-link:hover { border-color: var(--neon); color: var(--neon); }
+  .book-odds { color: var(--neon); font-weight: 700; }
+  .arb-bottom { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .btn-calc { background: transparent; border: 1px solid var(--neon); color: var(--neon); font-family: 'DM Mono', monospace; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.5rem 1.2rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
   .btn-calc:hover { background: var(--neon); color: var(--black); }
 
   /* ── LOCKED OVERLAY ── */
@@ -181,8 +188,10 @@
   /* ── MOBILE ── */
   @media (max-width: 768px) {
     .stats-row { grid-template-columns: repeat(2, 1fr); }
-    .arb-card { grid-template-columns: 1fr 1fr; }
-    .arb-card > :nth-child(5) { grid-column: 1/-1; }
+    .arb-card { padding: 1.25rem; }
+    .arb-top { flex-direction: column; }
+    .arb-profit-col { text-align: left; }
+    .arb-bottom { flex-direction: column; align-items: flex-start; }
     .topbar-email { display: none; }
     .locked-plans { grid-template-columns: 1fr; }
     .app-content { padding: 5rem 1rem 1rem; }
@@ -472,6 +481,7 @@ function findArbitrage(event, sport, id) {
 
   return {
     id,
+    eventId: event.id,
     sport: sport.filter,
     sportLabel: sport.label,
     match: `${event.home_team} vs ${event.away_team}`,
@@ -517,9 +527,11 @@ function initApp(user) {
   updatePlanUI(plan);
 
   // Fetch real data
+  fetchLiveScores();
   fetchArbitrageOpportunities();
-  // Refresh every 5 minutes
+  // Refresh arbs every 5 minutes, scores every 30 seconds
   setInterval(() => fetchArbitrageOpportunities(), 5 * 60 * 1000);
+  setInterval(() => fetchLiveScores(), 30 * 1000);
 }
 
 function updatePlanUI(plan) {
@@ -550,6 +562,74 @@ function checkManualPlan() {
 }
 
 // ─────────────────────────────────────────────
+// BOOKMAKER LINKS
+// ─────────────────────────────────────────────
+const BOOKMAKER_LINKS = {
+  'Bet365': 'https://www.bet365.com',
+  'William Hill': 'https://www.williamhill.com',
+  'Pinnacle': 'https://www.pinnacle.com',
+  'Unibet (UK)': 'https://www.unibet.co.uk',
+  'Unibet (FR)': 'https://www.unibet.fr',
+  'Unibet (NL)': 'https://www.unibet.nl',
+  'Unibet (SE)': 'https://www.unibet.se',
+  'Bwin': 'https://www.bwin.com',
+  '1xBet': 'https://www.1xbet.com',
+  'Betway': 'https://www.betway.com',
+  'DraftKings': 'https://www.draftkings.com',
+  'FanDuel': 'https://www.fanduel.com',
+  'BetMGM': 'https://www.betmgm.com',
+  'Caesars': 'https://www.caesars.com/sportsbook-and-casino',
+  'Ladbrokes': 'https://www.ladbrokes.com',
+  'Coral': 'https://www.coral.co.uk',
+  'Paddy Power': 'https://www.paddypower.com',
+  'Sky Bet': 'https://www.skybet.com',
+  '888sport': 'https://www.888sport.com',
+  'Marathon Bet': 'https://www.marathonbet.com',
+  'Betclic (FR)': 'https://www.betclic.fr',
+  'Betsson': 'https://www.betsson.com',
+  'Nordic Bet': 'https://www.nordicbet.com',
+  'BoyleSports': 'https://www.boylesports.com',
+  'Bet Victor': 'https://www.betvictor.com',
+  'LeoVegas': 'https://www.leovegas.com',
+  'Matchbook': 'https://www.matchbook.com',
+  'Smarkets': 'https://smarkets.com',
+  'Winamax (FR)': 'https://www.winamax.fr',
+  'Winamax (DE)': 'https://www.winamax.de',
+  'BetRivers': 'https://www.betrivers.com',
+  'Coolbet': 'https://www.coolbet.com',
+  'Fanatics': 'https://www.fanatics.com',
+  'MyBookie.ag': 'https://www.mybookie.ag',
+  'BetOnline.ag': 'https://www.betonline.ag',
+};
+
+// ─────────────────────────────────────────────
+// LIVE SCORES
+// ─────────────────────────────────────────────
+let liveScores = {};
+
+async function fetchLiveScores() {
+  for (const sport of SPORTS) {
+    try {
+      const res = await fetch(
+        `https://api.the-odds-api.com/v4/sports/${sport.key}/scores/?apiKey=${ODDS_API_KEY}&daysFrom=1`
+      );
+      if (!res.ok) continue;
+      const games = await res.json();
+      games.forEach(g => {
+        if (g.scores) {
+          liveScores[g.id] = {
+            home: g.scores.find(s => s.name === g.home_team)?.score || '0',
+            away: g.scores.find(s => s.name === g.away_team)?.score || '0',
+            completed: g.completed,
+            live: !g.completed && new Date(g.commence_time) <= new Date()
+          };
+        }
+      });
+    } catch(e) { continue; }
+  }
+}
+
+// ─────────────────────────────────────────────
 // FEED RENDERING
 // ─────────────────────────────────────────────
 function renderFeed(data) {
@@ -557,34 +637,55 @@ function renderFeed(data) {
   const filtered = currentFilter === 'all' ? data : data.filter(a => a.sport === currentFilter);
   document.getElementById('statLive').textContent = filtered.length;
 
-  feed.innerHTML = filtered.map(arb => `
+  if (filtered.length === 0) {
+    feed.innerHTML = `
+      <div style="text-align:center;padding:4rem;color:var(--gray-text);font-family:'DM Mono',monospace;font-size:0.8rem;">
+        No arbitrage opportunities found right now. Markets are efficient at this moment.<br>
+        <span style="color:var(--neon)">Auto-refreshing every 5 minutes...</span>
+      </div>`;
+    return;
+  }
+
+  feed.innerHTML = filtered.map(arb => {
+    const score = liveScores[arb.eventId];
+    const scoreHtml = score
+      ? `<div class="arb-score ${score.live ? 'live' : ''}">
+           ${score.live ? '<span class="score-live-dot">●</span> LIVE ' : score.completed ? '✓ FT ' : ''}
+           ${score.home} – ${score.away}
+         </div>`
+      : '';
+
+    const bookLinks = arb.outcomes.map(o => {
+      const url = BOOKMAKER_LINKS[o.book] || '#';
+      return `<a class="arb-book-link" href="${url}" target="_blank" rel="noopener">
+        ${o.book} <span class="book-odds">${o.odds}</span> →
+      </a>`;
+    }).join('');
+
+    return `
     <div class="arb-card" data-id="${arb.id}">
-      <div>
-        <div class="arb-match-name">${arb.match}</div>
-        <div class="arb-meta">
-          <span class="arb-sport-tag">${arb.sportLabel}</span>
-          <span class="arb-time">🕐 ${arb.time}</span>
+      <div class="arb-top">
+        <div>
+          <div class="arb-match-name">${arb.match}</div>
+          <div class="arb-meta">
+            <span class="arb-sport-tag">${arb.sportLabel}</span>
+            <span class="arb-time">🕐 ${arb.time}</span>
+          </div>
+          ${scoreHtml}
+        </div>
+        <div class="arb-profit-col">
+          <div class="arb-col-label">Profit</div>
+          <div class="arb-col-value ${arb.profitPct >= 4 ? 'high' : 'med'}">+${arb.profitPct.toFixed(1)}%</div>
+          <div class="arb-col-sub">+$${arb.profitAmt}/£1000</div>
         </div>
       </div>
-      <div>
-        <div class="arb-col-label">Profit</div>
-        <div class="arb-col-value ${arb.profitPct >= 4 ? 'high' : 'med'}">+${arb.profitPct.toFixed(1)}%</div>
-        <div class="arb-col-sub">+$${arb.profitAmt}/£1000</div>
-      </div>
-      <div>
-        <div class="arb-col-label">Bookmakers</div>
-        <div class="arb-books">${arb.bookmakers.map(b => `<span class="arb-book">${b}</span>`).join('')}</div>
-      </div>
-      <div>
-        <div class="arb-col-label">Outcomes</div>
-        <div class="arb-col-value" style="font-size:1rem;color:var(--white)">${arb.outcomes.length}-way arb</div>
-        <div class="arb-col-sub">${arb.outcomes.map(o => o.odds).join(' / ')}</div>
-      </div>
-      <div>
+      <div class="arb-book-links">${bookLinks}</div>
+      <div class="arb-bottom">
+        <div class="arb-col-sub">${arb.outcomes.map(o => `${o.name}: ${o.odds}`).join(' · ')}</div>
         <button class="btn-calc" onclick="openCalc(${arb.id})">Calculate Stakes →</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function filterSport(sport, btn) {
