@@ -447,14 +447,16 @@ async function fetchArbitrageOpportunities() {
 }
 
 function findArbitrage(event, sport, id) {
-  // For each outcome, find the best odds across all bookmakers
+  // Banned bookmakers
+  const BANNED = new Set(['BetMGM', 'Betfair', 'Betfair Exchange', 'Betfair Sportsbook', 'Suprabets', 'BetRivers', 'Smarkets', 'Casumo']);
+  const bookmakers = event.bookmakers?.filter(bm => !BANNED.has(bm.title)) || [];
   const outcomeNames = new Set();
-  event.bookmakers?.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
+  bookmakers.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
 
   const bestOdds = {};
   outcomeNames.forEach(name => {
     let best = { odds: 0, book: '' };
-    event.bookmakers?.forEach(bm => {
+    bookmakers.forEach(bm => {
       const outcome = bm.markets?.[0]?.outcomes?.find(o => o.name === name);
       if (outcome && outcome.price > best.odds) {
         best = { odds: outcome.price, book: bm.title };
