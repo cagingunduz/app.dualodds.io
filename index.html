@@ -375,16 +375,17 @@ const sb = createClient(
 );
 
 // ─────────────────────────────────────────────
-// ODDS API CONFIG
+// API-FOOTBALL CONFIG
 // ─────────────────────────────────────────────
-const ODDS_API_KEY = '89dd3e2bc659bc949bc2b710cc5fe6ba';
-const SPORTS = [
-  { key: 'soccer_epl', label: '⚽ Premier League', filter: 'soccer' },
-  { key: 'soccer_spain_la_liga', label: '⚽ La Liga', filter: 'soccer' },
-  { key: 'soccer_germany_bundesliga', label: '⚽ Bundesliga', filter: 'soccer' },
-  { key: 'basketball_nba', label: '🏀 NBA', filter: 'basketball' },
-  { key: 'americanfootball_nfl', label: '🏈 NFL', filter: 'nfl' },
-  { key: 'icehockey_nhl', label: '🏒 NHL', filter: 'hockey' },
+const AF_KEY = '6cd500ba3a0985b20916c1b5a7f6ff41';
+const AF_HOST = 'v3.football.api-sports.io';
+const LEAGUES = [
+  { id: 39,  label: '⚽ Premier League', filter: 'soccer' },
+  { id: 140, label: '⚽ La Liga', filter: 'soccer' },
+  { id: 78,  label: '⚽ Bundesliga', filter: 'soccer' },
+  { id: 135, label: '⚽ Serie A', filter: 'soccer' },
+  { id: 61,  label: '⚽ Ligue 1', filter: 'soccer' },
+  { id: 2,   label: '⚽ Champions League', filter: 'soccer' },
 ];
 
 let ARB_DATA = [];
@@ -400,20 +401,37 @@ async function fetchArbitrageOpportunities() {
   const allArbs = [];
   let id = 1;
 
-  for (const sport of SPORTS) {
+  for (const league of LEAGUES) {
     try {
-      const res = await fetch(
-        `https://api.the-odds-api.com/v4/sports/${sport.key}/odds/?apiKey=${ODDS_API_KEY}&regions=uk,eu,us&markets=h2h&oddsFormat=decimal`
+      // Get next 10 fixtures for this league
+      const fixturesRes = await fetch(
+        `https://${AF_HOST}/fixtures?league=${league.id}&next=10`,
+        { headers: { 'x-apisports-key': AF_KEY } }
       );
-      if (!res.ok) continue;
-      const events = await res.json();
+      if (!fixturesRes.ok) continue;
+      const fixturesData = await fixturesRes.json();
+      const fixtures = fixturesData.response || [];
 
-      for (const event of events) {
-        const arb = findArbitrage(event, sport, id);
-        if (arb) { allArbs.push(arb); id++; }
+      for (const fixture of fixtures) {
+        try {
+          // Get odds for this fixture
+          const oddsRes = await fetch(
+            `https://${AF_HOST}/odds?fixture=${fixture.fixture.id}&bookmaker=6,8,16,18&bet=1`,
+            { headers: { 'x-apisports-key': AF_KEY } }
+          );
+          if (!oddsRes.ok) continue;
+          const oddsData = await oddsRes.json();
+          const oddsResponse = oddsData.response || [];
+          if (oddsResponse.length === 0) continue;
+
+          const arb = findArbitrageAF(fixture, oddsResponse[0], league, id);
+          if (arb) { allArbs.push(arb); id++; }
+        } catch(e) {
+          continue;
+        }
       }
     } catch (e) {
-      console.log(`Skip ${sport.key}:`, e.message);
+      console.log(`Skip league ${league.id}:`, e.message);
     }
   }
 
@@ -437,44 +455,46 @@ async function fetchArbitrageOpportunities() {
   }
 }
 
-function findArbitrage(event, sport, id) {
-  // For each outcome, find the best odds across all bookmakers
-  const outcomeNames = new Set();
-  event.bookmakers?.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
+function findArbitrageAF(fixture, oddsObj, league, id) {
+  const bookmakers = oddsObj.bookmakers || [];
+  if (bookmakers.length < 2) return null;
 
-  const bestOdds = {};
-  outcomeNames.forEach(name => {
-    let best = { odds: 0, book: '' };
-    event.bookmakers?.forEach(bm => {
-      const outcome = bm.markets?.[0]?.outcomes?.find(o => o.name === name);
-      if (outcome && outcome.price > best.odds) {
-        best = { odds: outcome.price, book: bm.title };
+  // Find best odds for each outcome across all bookmakers
+  const bestOdds = {}; // { outcomeName: { odds, book } }
+
+  bookmakers.forEach(bm => {
+    const market = bm.bets?.find(b => b.id === 1); // Match Winner
+    if (!market) return;
+    market.values?.forEach(v => {
+      const odds = parseFloat(v.odd);
+      if (!bestOdds[v.value] || odds > bestOdds[v.value].odds) {
+        bestOdds[v.value] = { odds, book: bm.name };
       }
     });
-    if (best.odds > 0) bestOdds[name] = best;
   });
 
   const outcomes = Object.entries(bestOdds).map(([name, {odds, book}]) => ({ name, odds, book }));
   if (outcomes.length < 2) return null;
 
   const impliedSum = outcomes.reduce((s, o) => s + (1 / o.odds), 0);
-  if (impliedSum >= 1) return null; // Not an arbitrage
+  if (impliedSum >= 1) return null;
 
   const profitPct = ((1 / impliedSum) - 1) * 100;
-  if (profitPct < 0.5) return null; // Too small
+  if (profitPct < 0.3) return null;
 
-  const commence = new Date(event.commence_time);
-  const timeStr = commence.toLocaleDateString() === new Date().toLocaleDateString()
-    ? `Today ${commence.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
-    : commence.toLocaleDateString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const kickoff = new Date(fixture.fixture.date);
+  const isToday = kickoff.toDateString() === new Date().toDateString();
+  const timeStr = isToday
+    ? `Today ${kickoff.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
+    : `${kickoff.toLocaleDateString([], {month:'short', day:'numeric'})} ${kickoff.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
 
   const books = [...new Set(outcomes.map(o => o.book))];
 
   return {
     id,
-    sport: sport.filter,
-    sportLabel: sport.label,
-    match: `${event.home_team} vs ${event.away_team}`,
+    sport: league.filter,
+    sportLabel: league.label,
+    match: `${fixture.teams.home.name} vs ${fixture.teams.away.name}`,
     time: timeStr,
     profitPct: parseFloat(profitPct.toFixed(2)),
     profitAmt: parseFloat((profitPct * 10).toFixed(2)),
