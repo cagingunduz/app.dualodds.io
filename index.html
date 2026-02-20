@@ -375,24 +375,113 @@ const sb = createClient(
 );
 
 // ─────────────────────────────────────────────
-// DEMO ARB DATA
+// ODDS API CONFIG
 // ─────────────────────────────────────────────
-const ARB_DATA = [
-  { id:1, sport:'soccer', sportLabel:'⚽ Premier League', match:'Arsenal vs Chelsea', time:'Today 20:45', profitPct:4.2, profitAmt:42, bookmakers:['Bet365','Pinnacle'], outcomes:[{name:'Arsenal Win',odds:2.85,book:'Bet365'},{name:'Draw',odds:4.10,book:'Pinnacle'},{name:'Chelsea Win',odds:3.20,book:'1xBet'}] },
-  { id:2, sport:'tennis', sportLabel:'🎾 ATP Masters', match:'Djokovic vs Alcaraz', time:'Today 15:00', profitPct:6.1, profitAmt:61, bookmakers:['Betway','Unibet'], outcomes:[{name:'Djokovic',odds:1.95,book:'Betway'},{name:'Alcaraz',odds:2.40,book:'Unibet'}] },
-  { id:3, sport:'basketball', sportLabel:'🏀 NBA', match:'Lakers vs Celtics', time:'Today 01:30', profitPct:2.8, profitAmt:28, bookmakers:['DraftKings','FanDuel'], outcomes:[{name:'Lakers',odds:2.15,book:'DraftKings'},{name:'Celtics',odds:1.85,book:'FanDuel'}] },
-  { id:4, sport:'soccer', sportLabel:'⚽ La Liga', match:'Real Madrid vs Barcelona', time:'Tomorrow 21:00', profitPct:5.3, profitAmt:53, bookmakers:['1xBet','Bwin'], outcomes:[{name:'Real Madrid',odds:2.50,book:'1xBet'},{name:'Draw',odds:3.80,book:'Bwin'},{name:'Barcelona',odds:2.90,book:'Pinnacle'}] },
-  { id:5, sport:'nfl', sportLabel:'🏈 NFL', match:'Chiefs vs Ravens', time:'Sunday 18:30', profitPct:3.5, profitAmt:35, bookmakers:['BetMGM','DraftKings'], outcomes:[{name:'Chiefs',odds:1.90,book:'BetMGM'},{name:'Ravens',odds:2.20,book:'DraftKings'}] },
-  { id:6, sport:'hockey', sportLabel:'🏒 NHL', match:'Maple Leafs vs Bruins', time:'Today 23:00', profitPct:2.2, profitAmt:22, bookmakers:['Bet365','William Hill'], outcomes:[{name:'Maple Leafs',odds:2.30,book:'Bet365'},{name:'Bruins',odds:1.95,book:'William Hill'}] },
-  { id:7, sport:'soccer', sportLabel:'⚽ Bundesliga', match:'Bayern vs Dortmund', time:'Tomorrow 18:30', profitPct:4.8, profitAmt:48, bookmakers:['Pinnacle','Betfair'], outcomes:[{name:'Bayern',odds:1.75,book:'Pinnacle'},{name:'Draw',odds:4.50,book:'Betfair'},{name:'Dortmund',odds:5.20,book:'1xBet'}] },
-  { id:8, sport:'tennis', sportLabel:'🎾 WTA Tour', match:'Swiatek vs Sabalenka', time:'Today 13:00', profitPct:3.9, profitAmt:39, bookmakers:['Unibet','Betway'], outcomes:[{name:'Swiatek',odds:1.80,book:'Unibet'},{name:'Sabalenka',odds:2.50,book:'Betway'}] },
-  { id:9, sport:'basketball', sportLabel:'🏀 EuroLeague', match:'Real Madrid vs CSKA', time:'Tomorrow 19:00', profitPct:5.7, profitAmt:57, bookmakers:['Bwin','1xBet'], outcomes:[{name:'Real Madrid',odds:2.10,book:'Bwin'},{name:'CSKA Moscow',odds:2.05,book:'1xBet'}] },
-  { id:10, sport:'soccer', sportLabel:'⚽ Serie A', match:'Inter Milan vs Juventus', time:'Sunday 20:45', profitPct:3.1, profitAmt:31, bookmakers:['Bet365','Betfair'], outcomes:[{name:'Inter Milan',odds:2.40,book:'Bet365'},{name:'Draw',odds:3.60,book:'Betfair'},{name:'Juventus',odds:3.10,book:'Pinnacle'}] },
+const ODDS_API_KEY = '89dd3e2bc659bc949bc2b710cc5fe6ba';
+const SPORTS = [
+  { key: 'soccer_epl', label: '⚽ Premier League', filter: 'soccer' },
+  { key: 'soccer_spain_la_liga', label: '⚽ La Liga', filter: 'soccer' },
+  { key: 'soccer_germany_bundesliga', label: '⚽ Bundesliga', filter: 'soccer' },
+  { key: 'basketball_nba', label: '🏀 NBA', filter: 'basketball' },
+  { key: 'americanfootball_nfl', label: '🏈 NFL', filter: 'nfl' },
+  { key: 'icehockey_nhl', label: '🏒 NHL', filter: 'hockey' },
 ];
 
+let ARB_DATA = [];
 let currentFilter = 'all';
 let currentArb = null;
 let userPlan = 'none';
+
+// ─────────────────────────────────────────────
+// FETCH & CALCULATE ARBITRAGE
+// ─────────────────────────────────────────────
+async function fetchArbitrageOpportunities() {
+  document.getElementById('feedUpdated').textContent = 'Scanning...';
+  const allArbs = [];
+  let id = 1;
+
+  for (const sport of SPORTS) {
+    try {
+      const res = await fetch(
+        `https://api.the-odds-api.com/v4/sports/${sport.key}/odds/?apiKey=${ODDS_API_KEY}&regions=uk,eu,us&markets=h2h&oddsFormat=decimal`
+      );
+      if (!res.ok) continue;
+      const events = await res.json();
+
+      for (const event of events) {
+        const arb = findArbitrage(event, sport, id);
+        if (arb) { allArbs.push(arb); id++; }
+      }
+    } catch (e) {
+      console.log(`Skip ${sport.key}:`, e.message);
+    }
+  }
+
+  // Sort by profit % descending
+  allArbs.sort((a, b) => b.profitPct - a.profitPct);
+  ARB_DATA = allArbs;
+
+  const now = new Date();
+  document.getElementById('statUpdated').textContent = now.toLocaleTimeString();
+  document.getElementById('feedUpdated').textContent = `Updated ${now.toLocaleTimeString()}`;
+  document.getElementById('statLive').textContent = allArbs.length;
+
+  if (allArbs.length === 0) {
+    document.getElementById('arbFeed').innerHTML = `
+      <div style="text-align:center;padding:4rem;color:var(--gray-text);font-family:'DM Mono',monospace;font-size:0.8rem;">
+        No arbitrage opportunities found right now. Markets are efficient at this moment.<br>
+        <span style="color:var(--neon)">Auto-refreshing every 5 minutes...</span>
+      </div>`;
+  } else {
+    renderFeed(ARB_DATA);
+  }
+}
+
+function findArbitrage(event, sport, id) {
+  // For each outcome, find the best odds across all bookmakers
+  const outcomeNames = new Set();
+  event.bookmakers?.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
+
+  const bestOdds = {};
+  outcomeNames.forEach(name => {
+    let best = { odds: 0, book: '' };
+    event.bookmakers?.forEach(bm => {
+      const outcome = bm.markets?.[0]?.outcomes?.find(o => o.name === name);
+      if (outcome && outcome.price > best.odds) {
+        best = { odds: outcome.price, book: bm.title };
+      }
+    });
+    if (best.odds > 0) bestOdds[name] = best;
+  });
+
+  const outcomes = Object.entries(bestOdds).map(([name, {odds, book}]) => ({ name, odds, book }));
+  if (outcomes.length < 2) return null;
+
+  const impliedSum = outcomes.reduce((s, o) => s + (1 / o.odds), 0);
+  if (impliedSum >= 1) return null; // Not an arbitrage
+
+  const profitPct = ((1 / impliedSum) - 1) * 100;
+  if (profitPct < 0.5) return null; // Too small
+
+  const commence = new Date(event.commence_time);
+  const timeStr = commence.toLocaleDateString() === new Date().toLocaleDateString()
+    ? `Today ${commence.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
+    : commence.toLocaleDateString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+
+  const books = [...new Set(outcomes.map(o => o.book))];
+
+  return {
+    id,
+    sport: sport.filter,
+    sportLabel: sport.label,
+    match: `${event.home_team} vs ${event.away_team}`,
+    time: timeStr,
+    profitPct: parseFloat(profitPct.toFixed(2)),
+    profitAmt: parseFloat((profitPct * 10).toFixed(2)),
+    bookmakers: books,
+    outcomes
+  };
+}
 
 // ─────────────────────────────────────────────
 // INIT
@@ -422,17 +511,15 @@ sb.auth.onAuthStateChange((event, session) => {
 function initApp(user) {
   document.getElementById('appShell').classList.add('show');
   document.getElementById('topbarEmail').textContent = user.email;
-  document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
-  document.getElementById('feedUpdated').textContent = 'Updated just now';
 
-  // Check plan from user metadata
   const plan = user.user_metadata?.plan || 'none';
   userPlan = plan;
   updatePlanUI(plan);
 
-  renderFeed(ARB_DATA);
-  animateStats();
-  setInterval(() => animateStats(), 5000);
+  // Fetch real data
+  fetchArbitrageOpportunities();
+  // Refresh every 5 minutes
+  setInterval(() => fetchArbitrageOpportunities(), 5 * 60 * 1000);
 }
 
 function updatePlanUI(plan) {
