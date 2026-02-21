@@ -397,8 +397,8 @@ const sb = createClient(
 // ─────────────────────────────────────────────
 const ODDS_API_KEY = '687f8318285c3daefff18acffe294923';
 const TG_TOKEN = '8414884652:AAEPqw5D4-NLbkrsnNFitI3T2JsRCEC1WZM';
-const TG_CHANNEL = '@dualodds1';
-const TG_CHANNEL_LINK = 'https://t.me/dualodds1';
+const TG_CHANNEL = '@dualodds_alerts';
+const TG_CHANNEL_LINK = 'https://t.me/dualodds_alerts';
 
 // All sports — each has a plans array saying which plans can access it
 const ALL_SPORTS = [
@@ -537,8 +537,11 @@ async function fetchArbitrageOpportunities() {
 
 function findArbitrage(event, sport, id) {
   // Banned bookmakers
-  const BANNED = new Set(['BetMGM', 'Betfair', 'Betfair Exchange', 'Betfair Sportsbook', 'Suprabets', 'BetRivers', 'Smarkets', 'Casumo', 'Bovada', 'GTBets', 'Caesars']);
-  const bookmakers = event.bookmakers?.filter(bm => !BANNED.has(bm.title)) || [];
+  const ALLOWED = new Set([
+    'Bet365', 'Pinnacle', 'Unibet', 'Unibet (UK)', 'Unibet (FR)', 'Unibet (NL)', 'Unibet (SE)',
+    'Bwin', 'DraftKings', 'FanDuel', 'Betway', 'Betsson', 'Winamax', 'Winamax (FR)', 'Winamax (DE)', '1xBet'
+  ]);
+  const bookmakers = event.bookmakers?.filter(bm => ALLOWED.has(bm.title)) || [];
   const outcomeNames = new Set();
   bookmakers.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
 
