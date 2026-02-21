@@ -64,6 +64,11 @@
   .topbar-email { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: var(--gray-text); }
   .topbar-signout { background: none; border: 1px solid var(--gray-mid); color: var(--gray-text); font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 0.4rem 0.85rem; cursor: pointer; transition: all 0.2s; }
   .topbar-signout:hover { border-color: var(--neon); color: var(--neon); }
+  .btn-tg { display: inline-flex; align-items: center; gap: 0.4rem; background: #229ED9; border: none; color: #fff; font-family: 'DM Mono', monospace; font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.4rem 0.85rem; cursor: pointer; transition: all 0.2s; text-decoration: none; white-space: nowrap; }
+  .btn-tg:hover { background: #1a8bbf; }
+  .btn-tg.locked { background: none; border: 1px solid var(--gray-mid); color: var(--gray-text); cursor: not-allowed; }
+  .btn-tg.locked:hover { background: none; }
+  .filter-btn.plan-locked { opacity: 0.35; cursor: not-allowed; }
 
   /* ── MAIN CONTENT ── */
   .app-content { padding: 6rem 2rem 2rem; max-width: 1400px; margin: 0 auto; }
@@ -320,6 +325,10 @@
     <div class="topbar-right">
       <div class="topbar-plan" id="topbarPlan">FREE</div>
       <div class="topbar-email" id="topbarEmail">—</div>
+      <a class="btn-tg locked" id="tgBtn" href="#" target="_blank" rel="noopener">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.43 13.617l-2.963-.924c-.644-.204-.657-.644.136-.953l11.57-4.461c.537-.194 1.006.131.721.942z"/></svg>
+        Alerts
+      </a>
       <button class="topbar-signout" onclick="handleSignOut()">Sign Out</button>
     </div>
   </div>
@@ -353,12 +362,12 @@
     <!-- FILTERS -->
     <div class="filters">
       <span class="filter-label">Sport:</span>
-      <button class="filter-btn active" onclick="filterSport('all', this)">All</button>
-      <button class="filter-btn" onclick="filterSport('soccer', this)">⚽ Football</button>
-      <button class="filter-btn" onclick="filterSport('basketball', this)">🏀 Basketball</button>
-      <button class="filter-btn" onclick="filterSport('tennis', this)">🎾 Tennis</button>
-      <button class="filter-btn" onclick="filterSport('nfl', this)">🏈 NFL</button>
-      <button class="filter-btn" onclick="filterSport('hockey', this)">🏒 Hockey</button>
+      <button class="filter-btn active" data-sport="all" onclick="filterSport('all', this)">All</button>
+      <button class="filter-btn" data-sport="soccer" onclick="filterSport('soccer', this)">⚽ Football</button>
+      <button class="filter-btn" data-sport="basketball" onclick="filterSport('basketball', this)">🏀 Basketball</button>
+      <button class="filter-btn" data-sport="tennis" onclick="filterSport('tennis', this)">🎾 Tennis</button>
+      <button class="filter-btn" data-sport="nfl" onclick="filterSport('nfl', this)">🏈 NFL</button>
+      <button class="filter-btn" data-sport="hockey" onclick="filterSport('hockey', this)">🏒 Hockey</button>
     </div>
 
     <!-- FEED -->
@@ -384,22 +393,35 @@ const sb = createClient(
 );
 
 // ─────────────────────────────────────────────
-// ODDS API CONFIG
+// ODDS API + TELEGRAM CONFIG
 // ─────────────────────────────────────────────
 const ODDS_API_KEY = '687f8318285c3daefff18acffe294923';
-const SPORTS = [
-  { key: 'soccer_epl', label: '⚽ Premier League', filter: 'soccer' },
-  { key: 'soccer_spain_la_liga', label: '⚽ La Liga', filter: 'soccer' },
-  { key: 'soccer_germany_bundesliga', label: '⚽ Bundesliga', filter: 'soccer' },
-  { key: 'basketball_nba', label: '🏀 NBA', filter: 'basketball' },
-  { key: 'americanfootball_nfl', label: '🏈 NFL', filter: 'nfl' },
-  { key: 'icehockey_nhl', label: '🏒 NHL', filter: 'hockey' },
+const TG_TOKEN = '8414884652:AAEPqw5D4-NLbkrsnNFitI3T2JsRCEC1WZM';
+const TG_CHANNEL = '@dualodds1';
+const TG_CHANNEL_LINK = 'https://t.me/dualodds1';
+
+// All sports — each has a plans array saying which plans can access it
+const ALL_SPORTS = [
+  { key: 'soccer_epl',                label: '⚽ Premier League', filter: 'soccer',     plans: ['basic','pro','elite'] },
+  { key: 'soccer_spain_la_liga',      label: '⚽ La Liga',        filter: 'soccer',     plans: ['basic','pro','elite'] },
+  { key: 'soccer_germany_bundesliga', label: '⚽ Bundesliga',     filter: 'soccer',     plans: ['basic','pro','elite'] },
+  { key: 'basketball_nba',            label: '🏀 NBA',            filter: 'basketball', plans: ['basic','pro','elite'] },
+  { key: 'tennis_atp_french_open',    label: '🎾 Tennis',         filter: 'tennis',     plans: ['pro','elite'] },
+  { key: 'americanfootball_nfl',      label: '🏈 NFL',            filter: 'nfl',        plans: ['elite'] },
+  { key: 'icehockey_nhl',             label: '🏒 NHL',            filter: 'hockey',     plans: ['elite'] },
 ];
+
+// Refresh rates per plan (ms)
+const REFRESH_RATES = { basic: 10 * 60 * 1000, pro: 5 * 60 * 1000, elite: 1 * 60 * 1000 };
+
+let SPORTS = ALL_SPORTS;
+let refreshInterval = null;
 
 let ARB_DATA = [];
 let currentFilter = 'all';
 let currentArb = null;
 let userPlan = 'none';
+let sentArbIds = new Set(); // tracks arbs already sent to Telegram this session
 
 // ─────────────────────────────────────────────
 // FETCH & CALCULATE ARBITRAGE
@@ -430,10 +452,19 @@ async function fetchArbitrageOpportunities() {
   allArbs.sort((a, b) => b.profitPct - a.profitPct);
   ARB_DATA = allArbs;
 
+  // Send new arbs to Telegram
+  if (allArbs.length > 0) sendNewArbAlerts(allArbs);
+
   const now = new Date();
   document.getElementById('statUpdated').textContent = now.toLocaleTimeString();
   document.getElementById('feedUpdated').textContent = `Updated ${now.toLocaleTimeString()}`;
   document.getElementById('statLive').textContent = allArbs.length;
+
+  // Update avg profit
+  if (allArbs.length > 0) {
+    const avg = allArbs.reduce((s, a) => s + a.profitPct, 0) / allArbs.length;
+    document.getElementById('statAvg').textContent = `+${avg.toFixed(1)}%`;
+  }
 
   if (allArbs.length === 0) {
     document.getElementById('arbFeed').innerHTML = `
@@ -528,26 +559,126 @@ function initApp(user) {
   userPlan = plan;
   updatePlanUI(plan);
 
-  // Fetch real data
+  // Filter sports based on plan
+  SPORTS = ALL_SPORTS.filter(s => s.plans.includes(plan));
+  if (SPORTS.length === 0) SPORTS = ALL_SPORTS.filter(s => s.plans.includes('basic'));
+
+  // Lock sport filter buttons not available on this plan
+  updateSportFilters(plan);
+
+  // Update refresh label on stat card
+  const rateLabels = { basic: 'Refreshes every 10 min', pro: 'Refreshes every 5 min', elite: 'Refreshes every 1 min' };
+  document.querySelector('.stat-card:last-child .stat-card-sub').textContent = rateLabels[plan] || 'Refreshes every 10 min';
+
+  // Fetch data
   fetchLiveScores();
   fetchArbitrageOpportunities();
-  // Refresh arbs every 5 minutes, scores every 30 seconds
-  setInterval(() => fetchArbitrageOpportunities(), 5 * 60 * 1000);
+
+  // Dynamic refresh rate per plan
+  const rate = REFRESH_RATES[plan] || REFRESH_RATES.basic;
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(() => fetchArbitrageOpportunities(), rate);
   setInterval(() => fetchLiveScores(), 30 * 1000);
 }
 
 function updatePlanUI(plan) {
   const planEl = document.getElementById('topbarPlan');
+  const tgBtn = document.getElementById('tgBtn');
+
   if (plan === 'none' || !plan) {
     planEl.textContent = 'NO PLAN';
     planEl.style.borderColor = 'var(--gray-mid)';
     planEl.style.color = 'var(--gray-text)';
     document.getElementById('lockedOverlay').classList.add('show');
+    // Lock Telegram
+    tgBtn.classList.add('locked');
+    tgBtn.href = '#';
+    tgBtn.onclick = (e) => { e.preventDefault(); showToast('Upgrade to Pro to access Telegram alerts'); };
+  } else if (plan === 'basic') {
+    planEl.textContent = 'BASIC';
+    planEl.style.borderColor = 'var(--neon)';
+    planEl.style.color = 'var(--neon)';
+    document.getElementById('lockedOverlay').classList.remove('show');
+    // Lock Telegram for Basic
+    tgBtn.classList.add('locked');
+    tgBtn.href = '#';
+    tgBtn.onclick = (e) => { e.preventDefault(); showToast('📱 Upgrade to Pro to join the Telegram alerts channel'); };
   } else {
+    // Pro or Elite — full access
     planEl.textContent = plan.toUpperCase();
     planEl.style.borderColor = 'var(--neon)';
     planEl.style.color = 'var(--neon)';
     document.getElementById('lockedOverlay').classList.remove('show');
+    // Unlock Telegram
+    tgBtn.classList.remove('locked');
+    tgBtn.href = TG_CHANNEL_LINK;
+    tgBtn.onclick = null;
+  }
+}
+
+function updateSportFilters(plan) {
+  const sportPlans = {
+    soccer: ['basic','pro','elite'],
+    basketball: ['basic','pro','elite'],
+    tennis: ['pro','elite'],
+    nfl: ['elite'],
+    hockey: ['elite'],
+  };
+  document.querySelectorAll('.filter-btn[data-sport]').forEach(btn => {
+    const sport = btn.dataset.sport;
+    if (sport === 'all') return;
+    if (sportPlans[sport] && !sportPlans[sport].includes(plan)) {
+      btn.classList.add('plan-locked');
+      const needed = (sport === 'tennis') ? 'Pro' : 'Elite';
+      btn.onclick = (e) => {
+        e.preventDefault();
+        showToast(`Upgrade to ${needed} to access ${btn.textContent.trim()}`);
+      };
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+// TELEGRAM ALERTS
+// ─────────────────────────────────────────────
+async function sendTelegramAlert(arb) {
+  const bookLines = arb.outcomes.map(o => {
+    const url = BOOKMAKER_LINKS[o.book] || 'https://google.com/search?q=' + encodeURIComponent(o.book);
+    return `📗 <a href="${url}">${o.book}</a> → <b>${o.odds}</b>`;
+  }).join('\n');
+
+  const profitEmoji = arb.profitPct >= 4 ? '🔥' : arb.profitPct >= 2 ? '✅' : '💡';
+
+  const text =
+`${profitEmoji} <b>ARB ALERT — +${arb.profitPct.toFixed(2)}% Profit</b>
+
+🏟 <b>${arb.match}</b>
+${arb.sportLabel} · 🕐 ${arb.time}
+
+${bookLines}
+
+💰 <b>+$${arb.profitAmt.toFixed(2)}</b> per $1,000 staked
+🔗 <a href="https://app.dualodds.io">Open in DualOdds</a>`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TG_CHANNEL,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      })
+    });
+  } catch(e) { console.log('Telegram error:', e.message); }
+}
+
+async function sendNewArbAlerts(arbs) {
+  const newArbs = arbs.filter(a => !sentArbIds.has(a.eventId));
+  for (const arb of newArbs.slice(0, 5)) { // max 5 per cycle to avoid spam
+    await sendTelegramAlert(arb);
+    sentArbIds.add(arb.eventId);
   }
 }
 
