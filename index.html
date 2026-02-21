@@ -421,11 +421,12 @@ let ARB_DATA = [];
 let currentFilter = 'all';
 let currentArb = null;
 let userPlan = 'none';
-let sentArbIds = new Set();
+let sentArbIds = new Set();  // match keys already sent (never resend same match)
+let alertLog = [];           // timestamps of every alert sent in last 24h
 
-// Use match+date as key (stable across sessions, unlike eventId which can change)
+// Use match+date as stable key (not eventId which can change between sessions)
 function getMatchKey(arb) {
-  const date = new Date(arb.commenceTime).toISOString().slice(0, 10); // YYYY-MM-DD
+  const date = new Date(arb.commenceTime).toISOString().slice(0, 10);
   return `${arb.match}_${date}`.toLowerCase().replace(/\s+/g, '_');
 }
 
@@ -433,12 +434,13 @@ function loadSentIds() {
   try {
     const raw = localStorage.getItem('dualodds_sent');
     if (!raw) return;
-    const { ids, savedAt } = JSON.parse(raw);
-    // Expire after 24 hours
+    const { ids, log, savedAt } = JSON.parse(raw);
     if (Date.now() - savedAt < 24 * 60 * 60 * 1000) {
       ids.forEach(id => sentArbIds.add(id));
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      alertLog = (log || []).filter(ts => ts > cutoff);
     } else {
-      localStorage.removeItem('dualodds_sent'); // clear stale data
+      localStorage.removeItem('dualodds_sent');
     }
   } catch(e) { localStorage.removeItem('dualodds_sent'); }
 }
@@ -447,9 +449,36 @@ function saveSentIds() {
   try {
     localStorage.setItem('dualodds_sent', JSON.stringify({
       ids: [...sentArbIds],
+      log: alertLog,
       savedAt: Date.now()
     }));
   } catch(e) {}
+}
+
+// Returns true if we're allowed to send an alert right now
+function canSendAlert() {
+  const now = Date.now();
+  const oneDayAgo = now - 24 * 60 * 60 * 1000;
+  const oneHourAgo = now - 60 * 60 * 1000;
+
+  // Clean log — drop anything older than 24h
+  alertLog = alertLog.filter(ts => ts > oneDayAgo);
+
+  // Rule 1: Max 10 alerts per 24 hours
+  if (alertLog.length >= 10) {
+    console.log('Telegram: 24h limit reached (10/10)');
+    return false;
+  }
+
+  // Rule 2: Min 1 hour gap between alerts
+  const lastSent = alertLog.length > 0 ? Math.max(...alertLog) : 0;
+  if (lastSent > oneHourAgo) {
+    const minsLeft = Math.ceil((lastSent + 60 * 60 * 1000 - now) / 60000);
+    console.log(`Telegram: cooldown — next alert in ${minsLeft} min`);
+    return false;
+  }
+
+  return true;
 }
 
 // ─────────────────────────────────────────────
@@ -508,7 +537,7 @@ async function fetchArbitrageOpportunities() {
 
 function findArbitrage(event, sport, id) {
   // Banned bookmakers
-  const BANNED = new Set(['BetMGM', 'Betfair', 'Betfair Exchange', 'Betfair Sportsbook', 'Suprabets', 'BetRivers', 'Smarkets', 'Casumo']);
+  const BANNED = new Set(['BetMGM', 'Betfair', 'Betfair Exchange', 'Betfair Sportsbook', 'Suprabets', 'BetRivers', 'Smarkets', 'Casumo', 'Bovada', 'GTBets', 'Caesars']);
   const bookmakers = event.bookmakers?.filter(bm => !BANNED.has(bm.title)) || [];
   const outcomeNames = new Set();
   bookmakers.forEach(bm => bm.markets?.[0]?.outcomes?.forEach(o => outcomeNames.add(o.name)));
@@ -708,6 +737,9 @@ ${bookLines}
 }
 
 async function sendNewArbAlerts(arbs) {
+  // Check rate limits first (24h cap + 1h cooldown)
+  if (!canSendAlert()) return;
+
   // Only pre-match arbs (match hasn't started yet)
   const preMatch = arbs.filter(a => {
     const score = liveScores[a.eventId];
@@ -717,12 +749,15 @@ async function sendNewArbAlerts(arbs) {
     return !isLive && !isCompleted && !hasStarted;
   });
 
-  // Find the single best arb we haven't sent before (keyed by match+date)
+  // Find the single best arb for a match not already in the channel
   const bestNew = preMatch.find(a => !sentArbIds.has(getMatchKey(a)));
   if (!bestNew) return;
 
   await sendTelegramAlert(bestNew);
+
+  // Record the send — both the match key and the timestamp
   sentArbIds.add(getMatchKey(bestNew));
+  alertLog.push(Date.now());
   saveSentIds();
 }
 
