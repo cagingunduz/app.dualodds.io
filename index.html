@@ -421,37 +421,34 @@ let ARB_DATA = [];
 let currentFilter = 'all';
 let currentArb = null;
 let userPlan = 'none';
-let sentArbIds = new Set(); // tracks arbs already sent to Telegram this session
+let sentArbIds = new Set();
 
-// Load previously sent IDs from localStorage (survives page refresh)
-// We store them with a timestamp and expire after 6 hours
+// Use match+date as key (stable across sessions, unlike eventId which can change)
+function getMatchKey(arb) {
+  const date = new Date(arb.commenceTime).toISOString().slice(0, 10); // YYYY-MM-DD
+  return `${arb.match}_${date}`.toLowerCase().replace(/\s+/g, '_');
+}
+
 function loadSentIds() {
   try {
-    const stored = JSON.parse(localStorage.getItem('dualodds_sent_arbs') || '{}');
-    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
-    // Only keep IDs sent within last 6 hours
-    Object.entries(stored).forEach(([id, ts]) => {
-      if (ts > sixHoursAgo) sentArbIds.add(id);
-    });
-    // Save back cleaned version
-    saveSentIds();
-  } catch(e) {}
+    const raw = localStorage.getItem('dualodds_sent');
+    if (!raw) return;
+    const { ids, savedAt } = JSON.parse(raw);
+    // Expire after 24 hours
+    if (Date.now() - savedAt < 24 * 60 * 60 * 1000) {
+      ids.forEach(id => sentArbIds.add(id));
+    } else {
+      localStorage.removeItem('dualodds_sent'); // clear stale data
+    }
+  } catch(e) { localStorage.removeItem('dualodds_sent'); }
 }
 
 function saveSentIds() {
   try {
-    const stored = JSON.parse(localStorage.getItem('dualodds_sent_arbs') || '{}');
-    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
-    // Remove expired, add current
-    const cleaned = {};
-    sentArbIds.forEach(id => {
-      cleaned[id] = stored[id] || Date.now();
-    });
-    // Filter out old ones
-    Object.entries(cleaned).forEach(([id, ts]) => {
-      if (ts < sixHoursAgo) delete cleaned[id];
-    });
-    localStorage.setItem('dualodds_sent_arbs', JSON.stringify(cleaned));
+    localStorage.setItem('dualodds_sent', JSON.stringify({
+      ids: [...sentArbIds],
+      savedAt: Date.now()
+    }));
   } catch(e) {}
 }
 
@@ -547,6 +544,7 @@ function findArbitrage(event, sport, id) {
   return {
     id,
     eventId: event.id,
+    commenceTime: event.commence_time,
     sport: sport.filter,
     sportLabel: sport.label,
     match: `${event.home_team} vs ${event.away_team}`,
@@ -710,14 +708,22 @@ ${bookLines}
 }
 
 async function sendNewArbAlerts(arbs) {
-  // arbs are already sorted by profitPct descending
-  // Find the single best arb we haven't sent yet
-  const bestNew = arbs.find(a => !sentArbIds.has(a.eventId));
-  if (!bestNew) return; // all already sent
+  // Only pre-match arbs (match hasn't started yet)
+  const preMatch = arbs.filter(a => {
+    const score = liveScores[a.eventId];
+    const isLive = score && score.live;
+    const isCompleted = score && score.completed;
+    const hasStarted = new Date(a.commenceTime) <= new Date();
+    return !isLive && !isCompleted && !hasStarted;
+  });
+
+  // Find the single best arb we haven't sent before (keyed by match+date)
+  const bestNew = preMatch.find(a => !sentArbIds.has(getMatchKey(a)));
+  if (!bestNew) return;
 
   await sendTelegramAlert(bestNew);
-  sentArbIds.add(bestNew.eventId);
-  saveSentIds(); // persist to localStorage so refresh doesn't resend
+  sentArbIds.add(getMatchKey(bestNew));
+  saveSentIds();
 }
 
 function checkManualPlan() {
