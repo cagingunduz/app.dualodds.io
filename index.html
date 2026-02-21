@@ -423,6 +423,38 @@ let currentArb = null;
 let userPlan = 'none';
 let sentArbIds = new Set(); // tracks arbs already sent to Telegram this session
 
+// Load previously sent IDs from localStorage (survives page refresh)
+// We store them with a timestamp and expire after 6 hours
+function loadSentIds() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('dualodds_sent_arbs') || '{}');
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+    // Only keep IDs sent within last 6 hours
+    Object.entries(stored).forEach(([id, ts]) => {
+      if (ts > sixHoursAgo) sentArbIds.add(id);
+    });
+    // Save back cleaned version
+    saveSentIds();
+  } catch(e) {}
+}
+
+function saveSentIds() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('dualodds_sent_arbs') || '{}');
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+    // Remove expired, add current
+    const cleaned = {};
+    sentArbIds.forEach(id => {
+      cleaned[id] = stored[id] || Date.now();
+    });
+    // Filter out old ones
+    Object.entries(cleaned).forEach(([id, ts]) => {
+      if (ts < sixHoursAgo) delete cleaned[id];
+    });
+    localStorage.setItem('dualodds_sent_arbs', JSON.stringify(cleaned));
+  } catch(e) {}
+}
+
 // ─────────────────────────────────────────────
 // FETCH & CALCULATE ARBITRAGE
 // ─────────────────────────────────────────────
@@ -555,6 +587,9 @@ function initApp(user) {
   document.getElementById('appShell').classList.add('show');
   document.getElementById('topbarEmail').textContent = user.email;
 
+  // Load previously sent Telegram IDs so we don't resend on refresh
+  loadSentIds();
+
   const plan = user.user_metadata?.plan || 'none';
   userPlan = plan;
   updatePlanUI(plan);
@@ -675,11 +710,14 @@ ${bookLines}
 }
 
 async function sendNewArbAlerts(arbs) {
-  const newArbs = arbs.filter(a => !sentArbIds.has(a.eventId));
-  for (const arb of newArbs.slice(0, 5)) { // max 5 per cycle to avoid spam
-    await sendTelegramAlert(arb);
-    sentArbIds.add(arb.eventId);
-  }
+  // arbs are already sorted by profitPct descending
+  // Find the single best arb we haven't sent yet
+  const bestNew = arbs.find(a => !sentArbIds.has(a.eventId));
+  if (!bestNew) return; // all already sent
+
+  await sendTelegramAlert(bestNew);
+  sentArbIds.add(bestNew.eventId);
+  saveSentIds(); // persist to localStorage so refresh doesn't resend
 }
 
 function checkManualPlan() {
